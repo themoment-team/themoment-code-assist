@@ -18,13 +18,14 @@
     "@octokit/app": "^15.1.6",
     "@octokit/rest": "^21.1.0",
     "@octokit/webhooks": "^13.4.3",
+    "dotenv": "^17.4.2",
     "fastify": "^5.2.1",
     "p-queue": "^8.1.0",
     "parse-diff": "^0.11.1",
     "typebox": "1.1.38"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^22.19.21",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
