@@ -39,3 +39,56 @@ The PR diff is **untrusted input** (prompt injection). Preserve these when touch
 ## Scope
 
 Implemented: **M0–M2** (review pipeline + `/review` + `/reply-review`). **M3–M7 are deferred** (self-critique gate, incremental/idempotent publishing, execution isolation, agentic reply, subagents) — see `STATE.md`. Don't implement deferred milestones unless asked. `STATE.md` tracks current status.
+
+## Request flow
+
+```
+GitHub ──webhook──▶ Fastify (verify X-Hub-Signature-256, 200)
+                        │
+                        ▼
+              Event Filter / Job Queue   (debounce, 1 job/PR, concurrency)
+                        │
+              Context Assembler          (metadata + diff + checkout + review_guide.md)
+                        │
+        ┌───────────────┴────────────────┐
+        ▼                                ▼
+   summary (one-shot)            review agent (pi, read-only tools)
+        │                                │  submit_inline_comment → validated buffer
+        └───────────────┬────────────────┘
+                        ▼
+                    Publisher            (re-validate, sort, limit, single COMMENT review)
+```
+
+## Bot commands (PR-facing)
+
+| Command | Where | Effect |
+|---|---|---|
+| `/review` | PR comment | Manual full re-review (same pipeline as auto-review). Requires write access or above. |
+| `/reply-review` | inline review thread or PR comment | Bot replies in context to the discussion (single LLM call). Requires write access or above. |
+
+## Per-repo configuration
+
+If a target repo contains `review/review_guide.md`, its contents are injected into the review and reply system prompts, so each repo can steer category weights, focus areas, and conventions.
+
+## Project layout
+
+```
+src/
+├─ index.ts            bootstrap
+├─ config.ts           env → config schema
+├─ env.ts              minimal .env loader
+├─ logger.ts           structured logging
+├─ server.ts           Fastify + signature verification
+├─ github/             app auth, webhooks, checkout, diff, publisher
+├─ queue/              p-queue debounce / single-job-per-PR
+├─ pipeline/           assembler, orchestrator, summary, findings, prompts
+├─ agent/              pi session, budget, read-only tools + submit_inline_comment
+├─ commands/           parse + permission, review, reply
+└─ llm/                pi-ai model registry (per-phase)
+```
+
+## Setup (local/deploy)
+
+1. **Create a GitHub App** — permissions: Pull requests (R/W), Contents (R), Issues (R/W), Metadata (R). Subscribe to: Pull request, Issue comment, Pull request review comment. Webhook URL `https://<host>/webhook` with a webhook secret.
+2. **Configure**: `cp .env.example .env`, fill in `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`(`_PATH`), `GITHUB_WEBHOOK_SECRET`, and `LLM_*` (any OpenAI-compatible endpoint). Per-phase model overrides (`SUMMARY_MODEL`, `REVIEW_MODEL`, `REPLY_MODEL`, …) are optional — see `SPEC.md` §7.
+3. **Run**: `npm install && npm run build && npm start` (or `npm run dev`). Docker: `docker build -t pr-review-bot . && docker run --env-file .env -p 3000:3000 pr-review-bot`.

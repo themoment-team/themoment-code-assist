@@ -1,90 +1,69 @@
 # PR Review Bot
 
-A GitHub App that auto-reviews pull requests. For each PR it produces **two
-outputs in parallel** and publishes them as a single atomic review:
+PR을 자동으로 리뷰해주는 GitHub App입니다. PR이 열리면 요약과 인라인 코멘트를 하나의 리뷰로 묶어 게시합니다.
 
-- **summary** — a one-shot LLM call over PR metadata + diff → the review body.
-- **inline comments** — a single [pi](https://www.npmjs.com/package/@earendil-works/pi-agent-core)
-  agent per PR that explores the checked-out code with read-only tools and
-  submits grounded, line-anchored comments via a structured tool.
+- **summary** — PR 메타데이터 + diff를 LLM에 한 번 보내 리뷰 본문 생성
+- **inline comments** — [pi](https://www.npmjs.com/package/@earendil-works/pi-agent-core) 에이전트가 체크아웃된 코드를 읽기 전용 도구로 탐색하고, 구조화된 도구로 라인 기반 코멘트 제출
 
-This implements milestones **M0–M2** of [`SPEC.md`](./SPEC.md) (the MVP):
-the review pipeline plus the `/review` and `/reply-review` commands. Deferred
-items (self-critique gate, incremental/idempotent publishing, execution
-isolation, agentic reply, subagents) are M3+ and not built yet.
+현재 **M0–M2** (리뷰 파이프라인 + `/review` + `/reply-review`) 구현 완료. M3 이후(자기 비판 게이트, 증분 퍼블리싱, 실행 격리, 에이전트 리플라이, 서브에이전트)는 미구현입니다.
 
-## How it works
+## 동작 흐름
 
 ```
-GitHub ──webhook──▶ Fastify (verify X-Hub-Signature-256, 200)
+GitHub ──webhook──▶ Fastify (X-Hub-Signature-256 검증, 200 응답)
                         │
                         ▼
-              Event Filter / Job Queue   (debounce, 1 job/PR, concurrency)
+              Event Filter / Job Queue   (디바운스, PR당 1개 작업, 동시성 제어)
                         │
-              Context Assembler          (metadata + diff + checkout + review_guide.md)
+              Context Assembler          (메타데이터 + diff + 체크아웃 + review_guide.md)
                         │
         ┌───────────────┴────────────────┐
         ▼                                ▼
-   summary (one-shot)            review agent (pi, read-only tools)
-        │                                │  submit_inline_comment → validated buffer
+   summary (one-shot)            review agent (pi, 읽기 전용 도구)
+        │                                │  submit_inline_comment → 검증된 버퍼
         └───────────────┬────────────────┘
                         ▼
-                    Publisher            (re-validate, sort, limit, single COMMENT review)
+                    Publisher            (재검증, 정렬, 제한, 단일 COMMENT 리뷰)
 ```
 
-- **Auto-review** triggers on `pull_request` `opened` / `reopened` /
-  `ready_for_review` only — *not* on every push (`synchronize`). Re-run manually
-  with `/review`.
-- **Commands** (`/review`, `/reply-review`) require write access or above and
-  are ignored otherwise.
-- **Stateless**: no database. The job queue/debounce is in-process and volatile;
-  a lost in-flight job is recoverable via `/review`.
+- **자동 리뷰**는 `opened` / `reopened` / `ready_for_review` 이벤트에서만 실행 — `synchronize`(push)는 제외
+- **봇 명령어**는 쓰기 권한(write) 이상이 필요하며, 권한 없는 사용자의 명령은 무시됨
+- **무상태(stateless)**: DB 없음. 작업 큐는 인-프로세스/휘발성이며, 유실된 작업은 `/review`로 재실행 가능
 
-## Security model
+## 보안 모델
 
-The PR diff is treated as **untrusted input** (prompt injection is possible):
+PR diff는 **신뢰할 수 없는 입력**으로 취급 (프롬프트 인젝션 가능):
 
-- The agent has **read-only tools only** (`read_file`, `search`, `git_blame`) plus
-  `submit_inline_comment`, which only buffers — it never calls the GitHub API.
-  `write`/`edit`/`bash` are never registered, and a tool whitelist blocks anything
-  off-list as defense-in-depth.
-- Every tool confines filesystem access to the checkout root.
-- Comment line ranges are validated **twice** — at submission and again in the
-  Publisher immediately before posting — against the diff's commentable line set.
-- The review event is always `COMMENT`; the bot never approves, requests changes,
-  or merges.
+- 에이전트는 **읽기 전용 도구만** 보유 (`read_file`, `search`, `git_blame`) + `submit_inline_comment`는 버퍼링만 하고 GitHub API를 직접 호출하지 않음. `write`/`edit`/`bash`는 등록되지 않으며, 도구 화이트리스트로 이중 방어
+- 모든 파일시스템 도구는 체크아웃 루트로 경로를 제한
+- 코멘트 라인 범위는 제출 시점과 Publisher에서 **두 번 검증** — diff의 코멘트 가능 라인 집합을 기준으로
+- 리뷰 이벤트는 항상 `COMMENT` — 봇은 절대 승인(APPROVE), 변경 요청(REQUEST_CHANGES), 머지 불가
 
-> MVP runs on the host under a trusted-internal-org assumption. Per-job container
-> isolation (SPEC M5) is required before exposing this to external orgs.
+> MVP는 신뢰할 수 있는 내부 조직을 대상으로 실행됩니다. 외부 조직에 노출하려면 SPEC M5 (작업별 컨테이너 격리)가 필요합니다.
 
-## Setup
+## 설치 방법
 
-### 1. Create a GitHub App
+### 1. GitHub App 생성
 
-Permissions: **Pull requests** Read & Write, **Contents** Read, **Issues** Read &
-Write, **Metadata** Read. Subscribe to events: **Pull request**, **Issue comment**,
-**Pull request review comment**. Set the webhook URL to `https://<host>/webhook`
-and a webhook secret. Install it on your org/repos.
+권한: **Pull requests** (읽기/쓰기), **Contents** (읽기), **Issues** (읽기/쓰기), **Metadata** (읽기). 구독 이벤트: **Pull request**, **Issue comment**, **Pull request review comment**. 웹훅 URL을 `https://<host>/webhook`으로 설정하고 웹훅 시크릿을 등록한 뒤, 조직/저장소에 앱을 설치합니다.
 
-### 2. Configure
+### 2. 환경 변수 설정
 
 ```bash
 cp .env.example .env
-# fill in GITHUB_APP_ID, GITHUB_PRIVATE_KEY (or _PATH), GITHUB_WEBHOOK_SECRET,
-# and the LLM_* backend (any OpenAI-compatible endpoint, local or commercial).
+# GITHUB_APP_ID, GITHUB_PRIVATE_KEY(_PATH), GITHUB_WEBHOOK_SECRET,
+# LLM_* (OpenAI 호환 엔드포인트, 로컬/상용 모두 가능)을 채워넣으세요.
 ```
 
-Per-phase models (`SUMMARY_MODEL`, `REVIEW_MODEL`, `REPLY_MODEL`, …) are optional
-and fall back to the default `LLM_MODEL`. See [`.env.example`](./.env.example) and
-[`SPEC.md` §7](./SPEC.md) for every variable.
+페이즈별 모델(`SUMMARY_MODEL`, `REVIEW_MODEL`, `REPLY_MODEL`, …)은 선택 사항이며 기본 `LLM_MODEL`로 폴백됩니다. 전체 변수 목록은 [`.env.example`](./.env.example) 또는 `SPEC.md §7`을 참고하세요.
 
-### 3. Run
+### 3. 실행
 
 ```bash
 npm install
 npm run build
 npm start
-# or, for development:
+# 개발 중에는
 npm run dev
 ```
 
@@ -95,38 +74,34 @@ docker build -t pr-review-bot .
 docker run --env-file .env -p 3000:3000 pr-review-bot
 ```
 
-## Per-repo configuration
+## 저장소별 설정
 
-If a target repo contains `review/review_guide.md`, its contents are injected
-into the review and reply system prompts, so each repo can steer category
-weights, focus areas, and conventions.
+대상 저장소에 `review/review_guide.md` 파일이 있으면 그 내용이 리뷰·리플라이 시스템 프롬프트에 주입됩니다. 저장소마다 카테고리 가중치, 집중 영역, 컨벤션을 조정할 수 있습니다.
 
-## Commands
+## 봇 명령어
 
-| Command | Where | Effect |
+| 명령어 | 위치 | 효과 |
 |---|---|---|
-| `/review` | PR comment | Manual full re-review (same pipeline as auto-review). |
-| `/reply-review` | inline review thread **or** PR comment | The bot replies in context to the discussion (single LLM call). |
+| `/review` | PR 코멘트 | 수동 전체 리리뷰 (자동 리뷰와 동일 파이프라인). 쓰기 권한 필요. |
+| `/reply-review` | 인라인 리뷰 스레드 또는 PR 코멘트 | 봇이 해당 스레드 문맥으로 답변 (단일 LLM 호출). 쓰기 권한 필요. |
 
-## Project layout
+## 프로젝트 구조
 
 ```
 src/
-├─ index.ts            bootstrap
-├─ config.ts           env → config schema
-├─ env.ts              minimal .env loader
-├─ logger.ts           structured logging
-├─ server.ts           Fastify + signature verification
-├─ github/             app auth, webhooks, checkout, diff, publisher
-├─ queue/              p-queue debounce / single-job-per-PR
-├─ pipeline/           assembler, orchestrator, summary, findings, prompts
-├─ agent/              pi session, budget, read-only tools + submit_inline_comment
-├─ commands/           parse + permission, review, reply
-└─ llm/                pi-ai model registry (per-phase)
+├─ index.ts            부트스트랩
+├─ config.ts           환경 변수 → 설정 스키마
+├─ env.ts              최소 .env 로더
+├─ logger.ts           구조화 로깅
+├─ server.ts           Fastify + 서명 검증
+├─ github/             앱 인증, 웹훅, 체크아웃, diff, 퍼블리셔
+├─ queue/              p-queue 디바운스 / PR당 단일 작업
+├─ pipeline/           어셈블러, 오케스트레이터, 요약, findings, 프롬프트
+├─ agent/              pi 세션, 예산, 읽기 전용 도구 + submit_inline_comment
+├─ commands/           파싱 + 권한, review, reply
+└─ llm/                pi-ai 모델 레지스트리 (페이즈별)
 ```
 
-## Status / not yet implemented
+## 미구현 항목
 
-M3 self-critique gate · M4 incremental + idempotent publishing · M5 execution
-isolation · M6 agentic reply · M7 subagent spawn. These have placeholders in the
-architecture but are intentionally out of the MVP scope.
+M3 자기 비판 게이트 · M4 증분·멱등 퍼블리싱 · M5 실행 격리 · M6 에이전트 리플라이 · M7 서브에이전트 — 아키텍처상 플레이스홀더는 존재하나 MVP 범위 밖입니다.
