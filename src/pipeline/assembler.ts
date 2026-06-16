@@ -22,7 +22,7 @@ export interface AssembledContext {
   headSha: string;
 }
 
-const REVIEW_GUIDE_PATH = "review/review_guide.md";
+const REVIEW_GUIDE_PATH = ".review/review_guide.md";
 
 export async function assembleContext(opts: {
   app: GitHubApp;
@@ -73,7 +73,7 @@ export async function assembleContext(opts: {
   return { meta, diff, checkout, reviewGuide, headSha: pr.head.sha };
 }
 
-/** Read review/review_guide.md from the checkout root if present (SPEC §4.2, D11). */
+/** Read .review/review_guide.md from the checkout root if present (SPEC §4.2, D11). */
 async function loadReviewGuide(dir: string, logger: Logger): Promise<string | undefined> {
   try {
     const content = await readFile(join(dir, REVIEW_GUIDE_PATH), "utf8");

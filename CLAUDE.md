@@ -68,7 +68,7 @@ GitHub ──webhook──▶ Fastify (verify X-Hub-Signature-256, 200)
 
 ## Per-repo configuration
 
-If a target repo contains `review/review_guide.md`, its contents are injected into the review and reply system prompts, so each repo can steer category weights, focus areas, and conventions.
+If a target repo contains `.review/review_guide.md`, its contents are injected into the review and reply system prompts, so each repo can steer category weights, focus areas, and conventions.
 
 ## Project layout
 

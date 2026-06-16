@@ -32,7 +32,7 @@ function metaBlock(meta: PrMeta): string {
 
 function guideBlock(reviewGuide?: string): string {
   if (!reviewGuide || reviewGuide.trim() === "") return "";
-  return `\n\n## Repository review guide (review/review_guide.md)\nFollow these repo-specific rules; they take precedence over general guidance:\n\n${reviewGuide.trim()}\n`;
+  return `\n\n## Repository review guide (.review/review_guide.md)\nFollow these repo-specific rules; they take precedence over general guidance:\n\n${reviewGuide.trim()}\n`;
 }
 
 const UNTRUSTED_NOTE =
