@@ -49,8 +49,12 @@ export function backendFor(config: Config, phase: Phase): PhaseBackend {
   const model = buildModel(mc);
   const apiKey = mc.apiKey;
 
+  // The agent loop calls streamFn with options that include `apiKey: undefined`
+  // (it resolves via getApiKey/config.apiKey, neither of which we set). Spread
+  // options FIRST so our per-phase apiKey always wins — otherwise the undefined
+  // clobbers it and the provider throws "No API key for provider: custom".
   const streamFn: StreamFn = (m, ctx, options) =>
-    streamSimple(m, ctx, { apiKey, ...options });
+    streamSimple(m, ctx, { ...options, apiKey });
 
   return {
     model,
