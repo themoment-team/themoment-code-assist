@@ -16,12 +16,15 @@ import { createReadFileTool } from "./tools/read_file.js";
 import { createSearchTool } from "./tools/search.js";
 import { createGitBlameTool } from "./tools/git_blame.js";
 import { createSubmitCommentTool } from "./tools/submit_comment.js";
+import { createFinishReviewTool } from "./tools/finish_review.js";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
 
 const ALLOWED_TOOLS = new Set([
   "read_file",
   "search",
   "git_blame",
   "submit_inline_comment",
+  "finish_review",
 ]);
 
 export interface RunAgentInput {
@@ -59,7 +62,21 @@ export async function runReviewAgent(input: RunAgentInput): Promise<RunAgentResu
     createSearchTool(checkoutDir),
     createGitBlameTool(checkoutDir),
     createSubmitCommentTool(buffer),
+    createFinishReviewTool(),
   ];
+
+  // Wrap the backend streamFn to add tool_choice:"required" on every turn.
+  // Without this, llama.cpp (and similar local servers) use "auto" mode and
+  // rely on the model to naturally emit tool calls — local models often just
+  // write findings as plain text instead. Forcing "required" makes the server
+  // use grammar-based constrained generation so tool calls are always produced.
+  // The finish_review tool lets the model signal completion without calling a
+  // real tool, avoiding an infinite loop.
+  const streamFnWithForcedTools: StreamFn = (m, ctx, options) =>
+    backend.streamFn(m, ctx, {
+      ...options,
+      toolChoice: ctx.tools && ctx.tools.length > 0 ? "required" : undefined,
+    } as Parameters<typeof backend.streamFn>[2]);
 
   logger.info("review agent starting", {
     tools: tools.map((t) => t.name),
@@ -80,7 +97,7 @@ export async function runReviewAgent(input: RunAgentInput): Promise<RunAgentResu
       tools,
       messages: [],
     },
-    streamFn: backend.streamFn,
+    streamFn: streamFnWithForcedTools,
     toolExecution: "parallel",
     // Tool whitelist (defense-in-depth): write/edit/bash are never registered,
     // but block anything off-list explicitly anyway (SPEC §4.4, §8).
