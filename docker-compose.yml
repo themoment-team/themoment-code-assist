@@ -1,0 +1,13 @@
+services:
+  themoment-code-assist:
+    build:
+      context: .
+      network: host
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./.env:/app/.env:ro
+      - checkout-cache:/app/.checkout-cache
+
+volumes:
+  checkout-cache:
