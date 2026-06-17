@@ -45,25 +45,27 @@ export function buildReviewSystemPrompt(opts: {
   language: string;
   reviewGuide?: string;
 }): string {
-  return `You are a senior software engineer performing a first-pass code review of a single GitHub pull request. You explore the checked-out repository with read-only tools and submit grounded inline comments.
+  return `You are a senior software engineer performing a first-pass code review of a single GitHub pull request. You have read-only tools to explore the repository and one output tool: submit_inline_comment.
+
+CRITICAL: Your text responses are NOT shown to anyone. The ONLY way to deliver review findings is by calling submit_inline_comment. If you write findings as plain text instead of calling the tool, they are silently discarded. Every finding must go through the tool — there are no exceptions.
 
 ${UNTRUSTED_NOTE}
 
 ## Goal
-Review the CHANGED code the way an experienced engineer would and comment on the problems you find: correctness bugs, security issues, performance regressions, and serious maintainability concerns. Don't comment on style preferences, formatting, or unchanged code.
+Review the CHANGED code the way an experienced engineer would. Find real problems: correctness bugs, security issues, performance regressions, serious maintainability concerns. Do not comment on style preferences, formatting, or unchanged code.
 
-## How to work
-- Start from the diff. Decide which files deserve deep review and which to skip (lock files, generated code, vendored deps, bulk renames, pure formatting).
-- Use the tools to explore as much as you need: read_file for surrounding context, search for callers/usages/definitions, git_blame for the history behind a change.
-- For each meaningful change, think about what could go wrong: edge cases, error paths, concurrency, input validation, breaking changes to callers.
-- Stop when you have reviewed the meaningful changes and commented on what you found.
+## Workflow
+1. Read the diff below. Identify which files need deep review and which to skip (lock files, generated code, vendored deps, bulk renames, pure formatting changes).
+2. For files that matter, use read_file / search / git_blame to gather enough context to be confident about each finding.
+3. For every problem you find, call submit_inline_comment immediately. Do not batch them up or write them as text first.
+4. After submitting all findings, stop.
 
-## Submitting comments
-- Submit each finding with the submit_inline_comment tool. Anchor it to exact diff lines using L/R notation: side LEFT = old/deleted line numbers, side RIGHT = new/added line numbers. The diff below is annotated with L<n>/R<n> on every line.
-- For a single line, set line + side. For a range, also set start_line + start_side (e.g. deleted line 59 to added line 60 → start_line:59 start_side:LEFT, line:60 side:RIGHT).
-- The tool validates positions immediately. If it returns REJECTED, fix the line/side against the annotated diff and resubmit.
-- suggestion (replacement code) is only allowed on a RIGHT-only range.
-- Fill evidence with a short summary of what your tool calls showed, so the finding is auditable.
+## How to call submit_inline_comment
+- Anchor to exact diff lines using L/R notation: side LEFT = old/deleted line numbers, side RIGHT = new/added line numbers. Every line in the diff below is prefixed with its L<n> or R<n> number.
+- Single line: set line + side. Range: also set start_line + start_side (e.g. deleted line 59 to added line 60 → start_line:59 start_side:LEFT, line:60 side:RIGHT).
+- If the tool returns REJECTED, fix the line/side from the annotated diff and resubmit — do not give up.
+- suggestion (replacement code) is only valid on a RIGHT-only range.
+- Fill evidence with a short summary of what your tool calls confirmed.
 
 ## Output language
 Write every comment body (and suggestions' prose) in ${opts.language}.${guideBlock(opts.reviewGuide)}`;
@@ -71,7 +73,14 @@ Write every comment body (and suggestions' prose) in ${opts.language}.${guideBlo
 
 /** User message for the review agent: metadata + L/R annotated diff (SPEC §4.3). */
 export function buildReviewUserMessage(meta: PrMeta, annotatedDiff: string): string {
-  return `Review this pull request.\n\n${metaBlock(meta)}\n\n## Diff (annotated with L/old and R/new line numbers)\n${annotatedDiff}\n\nExplore as needed, then submit inline comments for the issues you find. When done, stop.`;
+  return `Review this pull request. For every problem you find, call submit_inline_comment — do not write findings as text.
+
+${metaBlock(meta)}
+
+## Diff (annotated with L/old and R/new line numbers)
+${annotatedDiff}
+
+Go through the diff, explore with read_file/search/git_blame as needed, and submit each finding with submit_inline_comment. When you have submitted all findings, stop.`;
 }
 
 /** System prompt for the one-shot summary call (SPEC §4.3 (1)). */
