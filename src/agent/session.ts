@@ -128,6 +128,25 @@ export async function runReviewAgent(input: RunAgentInput): Promise<RunAgentResu
         }
       }
     }
+    // Log the full assistant message content at debug level for diagnosis.
+    if (event.type === "message_end") {
+      const msg = event.message as any;
+      if (msg.role === "assistant" && Array.isArray(msg.content)) {
+        const text = msg.content
+          .filter((c: any) => c.type === "text")
+          .map((c: any) => c.text as string)
+          .join("");
+        const toolCalls = msg.content
+          .filter((c: any) => c.type === "toolCall")
+          .map((c: any) => ({ name: c.name, args: c.arguments }));
+        logger.debug("agent message", {
+          stopReason: msg.stopReason,
+          toolCallCount: toolCalls.length,
+          toolCalls,
+          text,
+        });
+      }
+    }
     if (event.type === "tool_execution_start") {
       logger.info("tool exec start", { tool: event.toolName, args: event.args });
     }
