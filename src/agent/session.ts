@@ -107,6 +107,14 @@ export async function runReviewAgent(input: RunAgentInput): Promise<RunAgentResu
     signal.removeEventListener("abort", onAbort);
   }
 
+  // pi-agent-core swallows stream errors: it records them on state.errorMessage
+  // and resolves normally (agent.js handleRunFailure) rather than throwing. If
+  // the run failed for a reason other than our own cancellation, surface it as a
+  // rejection so the orchestrator logs it and marks a partial failure (SPEC §4.5).
+  if (agent.state.errorMessage && !signal.aborted) {
+    throw new Error(`review agent stream failed: ${agent.state.errorMessage}`);
+  }
+
   const stats = budget.stats;
   logger.info("review agent finished", {
     iterations: stats.iterations,
