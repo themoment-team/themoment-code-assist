@@ -6,7 +6,7 @@
  * Octokit per installation id for the token's lifetime.
  */
 import { App } from "@octokit/app";
-import type { Octokit } from "@octokit/rest";
+import { Octokit } from "@octokit/rest";
 import type { Config } from "../config.js";
 
 export class GitHubApp {
@@ -18,6 +18,10 @@ export class GitHubApp {
       appId: config.github.appId,
       privateKey: config.github.privateKey,
       webhooks: { secret: config.github.webhookSecret },
+      // Use @octokit/rest's Octokit so installation clients expose REST methods at
+      // the top level (octokit.pulls / octokit.issues), matching every call site.
+      // The default @octokit/app Octokit only namespaces them under `.rest`.
+      Octokit,
     });
   }
 
@@ -36,7 +40,7 @@ export class GitHubApp {
     if (hit && hit.expiresAt - 60_000 > now) {
       return hit.octokit;
     }
-    const octokit = (await this.app.getInstallationOctokit(installationId)) as unknown as Octokit;
+    const octokit = (await this.app.getInstallationOctokit(installationId)) as Octokit;
     // Installation tokens live ~60 min; refresh conservatively at 50 min.
     this.cache.set(installationId, { octokit, expiresAt: now + 50 * 60_000 });
     return octokit;
