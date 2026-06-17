@@ -61,6 +61,17 @@ export async function runReviewAgent(input: RunAgentInput): Promise<RunAgentResu
     createSubmitCommentTool(buffer),
   ];
 
+  logger.info("review agent starting", {
+    tools: tools.map((t) => t.name),
+    thinkingLevel: config.thinkingLevel,
+    model: backend.model.id,
+    limits: {
+      maxIterations: config.limits.maxLoopIterations,
+      maxTokens: config.limits.maxLoopTokens,
+      timeoutMs: config.limits.jobTimeoutMs,
+    },
+  });
+
   const agent = new Agent({
     initialState: {
       systemPrompt,
@@ -80,18 +91,45 @@ export async function runReviewAgent(input: RunAgentInput): Promise<RunAgentResu
     // Budget enforcement + observability.
     afterToolCall: async (ctx) => {
       const terminate = budget.check();
-      logger.debug("tool call", { tool: ctx.toolCall.name, isError: ctx.isError });
+      const logFields: Record<string, unknown> = {
+        tool: ctx.toolCall.name,
+        isError: ctx.isError,
+        findingsSoFar: buffer.size,
+        terminate,
+      };
+      // For submit_inline_comment, surface accept/reject from the tool result details.
+      if (ctx.toolCall.name === "submit_inline_comment") {
+        const details = ctx.result.details as { accepted?: boolean } | undefined;
+        logFields.accepted = details?.accepted;
+        if (!details?.accepted) {
+          const content = ctx.result.content[0];
+          logFields.rejection = content && "text" in content ? content.text : "(no message)";
+        }
+      }
+      logger.info("tool call", logFields);
       return terminate ? { terminate: true } : undefined;
     },
   });
 
   // Track token usage and surface a tool-call trace for observability (§9).
   agent.subscribe((event) => {
-    if (event.type === "turn_end" && event.message.role === "assistant") {
-      budget.addUsage(event.message.usage);
+    if (event.type === "turn_end") {
+      const msg = event.message as any;
+      if (msg.role === "assistant") {
+        budget.addUsage(msg.usage);
+        const toolCallCount = Array.isArray(msg.content)
+          ? msg.content.filter((c: any) => c.type === "toolCall").length
+          : 0;
+        if (toolCallCount === 0) {
+          logger.info("agent turn: text-only response (no tool calls)", {
+            findingsSoFar: buffer.size,
+            stopReason: msg.stopReason,
+          });
+        }
+      }
     }
     if (event.type === "tool_execution_start") {
-      logger.debug("tool exec", { tool: event.toolName });
+      logger.info("tool exec start", { tool: event.toolName, args: event.args });
     }
   });
 
