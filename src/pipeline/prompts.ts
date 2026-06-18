@@ -58,7 +58,7 @@ Review the CHANGED code the way an experienced engineer would. Find real problem
 1. Read the diff below. Identify which files need deep review and which to skip (lock files, generated code, vendored deps, bulk renames, pure formatting changes).
 2. For files that matter, use read_file / search / git_blame to gather enough context to be confident about each finding.
 3. For every problem you find, call submit_inline_comment immediately. Do not batch them up or write them as text first.
-4. When you have reviewed all meaningful changes and submitted all findings, call finish_review to end the session.
+4. After submitting all findings, stop.
 
 ## How to call submit_inline_comment
 - Anchor to exact diff lines using L/R notation: side LEFT = old/deleted line numbers, side RIGHT = new/added line numbers. Every line in the diff below is prefixed with its L<n> or R<n> number.
