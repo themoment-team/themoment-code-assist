@@ -14,13 +14,15 @@ const COMMAND_TOKENS: Record<string, Command> = {
 
 const ALLOWED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
-/** Detect a command appearing as a standalone line in a comment body. */
+/** Detect a command appearing as a standalone line in a comment body.
+ *  /reply-review supports an optional inline message: `/reply-review [message]` */
 export function detectCommand(body: string | null | undefined): Command | undefined {
   if (!body) return undefined;
   for (const rawLine of body.split(/\r?\n/)) {
     const line = rawLine.trim();
     const cmd = COMMAND_TOKENS[line];
     if (cmd) return cmd;
+    if (line.startsWith("/reply-review ")) return "reply-review";
   }
   return undefined;
 }

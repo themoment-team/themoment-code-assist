@@ -22,11 +22,17 @@ export interface ReplyContext {
   logger: Logger;
 }
 
-/** Strip the /reply-review trigger line from the last user utterance. */
+/** Strip the /reply-review trigger from the body, preserving any inline message.
+ *  `/reply-review question` → `"question"`, `/reply-review` → `""` */
 function stripCommand(body: string): string {
   return body
     .split(/\r?\n/)
-    .filter((l) => l.trim() !== "/reply-review")
+    .flatMap((l) => {
+      const trimmed = l.trim();
+      if (trimmed === "/reply-review") return [];
+      if (trimmed.startsWith("/reply-review ")) return [trimmed.slice("/reply-review ".length).trim()];
+      return [l];
+    })
     .join("\n")
     .trim();
 }
