@@ -26,7 +26,13 @@ export function buildModel(mc: ModelConfig): Model<any> {
     api: mc.api as any,
     provider: "custom" as any,
     baseUrl: mc.baseUrl,
-    reasoning: false,
+    // Without reasoning:true pi-ai clamps every thinking level to "off"; the
+    // xhigh map entry stops it clamping xhigh down to high.
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh" },
+    // reasoning:true would otherwise send the system prompt as the `developer`
+    // role, which Qwen/llama.cpp chat templates don't handle.
+    compat: { supportsDeveloperRole: false },
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: mc.contextWindow,
