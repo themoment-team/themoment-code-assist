@@ -1,0 +1,73 @@
+# CI: typecheck → build → boot smoke test → Docker image build.
+# Verification only — this workflow never deploys. Production deploys stay
+# manual on the server (git pull && sudo docker compose up -d --build).
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+      # tsc can't catch a missing `.js` import extension (NodeNext ESM) — only
+      # actually loading dist/ does. Boot with throwaway config, then check
+      # /healthz and that webhook signature verification accepts/rejects.
+      - name: Smoke test (boot + healthz + webhook signature)
+        run: |
+          export GITHUB_APP_ID=1
+          export GITHUB_PRIVATE_KEY_PATH="$RUNNER_TEMP/ci-key.pem"
+          export GITHUB_WEBHOOK_SECRET=ci-secret
+          export LLM_BASE_URL=http://127.0.0.1:9/v1
+          export LLM_MODEL=ci
+          export PORT=3999 HOST=127.0.0.1
+          openssl genrsa -out "$GITHUB_PRIVATE_KEY_PATH" 2048 2>/dev/null
+
+          node dist/index.js > "$RUNNER_TEMP/bot.log" 2>&1 &
+          PID=$!
+          fail() { echo "::error::$1"; cat "$RUNNER_TEMP/bot.log"; kill "$PID" 2>/dev/null; exit 1; }
+
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3999/healthz >/dev/null && break
+            kill -0 "$PID" 2>/dev/null || fail "bot exited during startup"
+            sleep 0.5
+          done
+          [ "$(curl -s http://127.0.0.1:3999/healthz)" = '{"status":"ok"}' ] || fail "healthz not ok"
+
+          webhook() {
+            curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3999/webhook \
+              -H 'content-type: application/json' -H 'x-github-delivery: ci' \
+              -H 'x-github-event: ping' -H "x-hub-signature-256: $1" -d "$2"
+          }
+          BODY='{"zen":"ci"}'
+          SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$GITHUB_WEBHOOK_SECRET" | sed 's/^.* //')"
+          [ "$(webhook "$SIG" "$BODY")" = 200 ] || fail "valid signature was not accepted"
+          [ "$(webhook sha256=00 "$BODY")" = 401 ] || fail "invalid signature was not rejected"
+
+          kill "$PID"
+          echo "smoke test passed"
+
+      - name: Docker build
+        run: docker build -t pr-review-bot:ci .
