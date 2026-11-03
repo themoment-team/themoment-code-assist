@@ -74,6 +74,21 @@ docker build -t pr-review-bot .
 docker run --env-file .env -p 3000:3000 pr-review-bot
 ```
 
+## 모니터링
+
+`scripts/monitor.sh`가 서버 cron에서 5분마다 봇(`/healthz`), LLM 서버(`/models`), 루트 디스크 사용량을 확인하고, 상태가 바뀔 때만(장애 🚨 / 복구 ✅) Discord로 알립니다. sudo 없이 배포 계정으로 동작하며, 일시적인 끊김은 10초 간격 3회 재시도로 거릅니다.
+
+```bash
+# 1. .env에 Discord 채널 웹훅 URL 추가
+#    MONITOR_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+# 2. 알림 테스트
+scripts/monitor.sh --test
+# 3. cron 등록 (crontab -e)
+*/5 * * * * /home/ubuntu/themoment-code-assist/scripts/monitor.sh >/dev/null 2>&1
+```
+
+상태와 알림 이력은 `~/.local/state/review-bot-monitor/`(`monitor.log`)에 남습니다. 서버 자체가 꺼지면 이 스크립트도 멈추므로 그 경우는 감지하지 못합니다.
+
 ## 저장소별 설정
 
 대상 저장소에 `.review/review_guide.md` 파일이 있으면 그 내용이 리뷰·리플라이 시스템 프롬프트에 주입됩니다. 저장소마다 카테고리 가중치, 집중 영역, 컨벤션을 조정할 수 있습니다.
